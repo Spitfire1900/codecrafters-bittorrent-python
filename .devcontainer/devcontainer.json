@@ -1,0 +1,29 @@
+{
+  "name": "CodeCrafters BitTorrent Python",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14-trixie",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "upgradePackages": true
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "terminal.integrated.defaultProfile.linux": "xonsh"
+      }
+    }
+  },
+  "runArgs": [
+    "--add-host=host.docker.internal:172.17.0.1"
+  ],
+  "mounts": [
+    "source=${localEnv:HOME}/.xonshrc,target=/home/vscode/.xonshrc,type=bind,readonly",
+    "source=${localEnv:HOME}/.config/opencode,target=/home/vscode/.config/opencode,type=bind,readonly"
+  ]
+}
