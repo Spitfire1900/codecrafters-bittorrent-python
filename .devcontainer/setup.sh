@@ -2,7 +2,7 @@
 set -e
 
 pip install --upgrade pip
-pip install pipx
+pip install --upgrade-strategy eager pipx
 pipx install xonsh[full]
 pipx inject xonsh instld
 pipx inject xonsh xontrib-prompt-bar
@@ -10,7 +10,7 @@ pipx inject xonsh xontrib-pygitstatus
 pipx inject xonsh xontrib-vox
 
 curl -LsSf https://astral.sh/uv/install.sh | sh
-curl -fsSL https://opencode.ai/install.sh | bash
+curl -fsSL https://opencode.ai/install | bash
 curl -fsSL https://codecrafters.io/install.sh | bash
 
 # Install zoxide (fast "cd" replacement) and add shell initialization
