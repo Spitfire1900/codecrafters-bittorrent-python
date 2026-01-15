@@ -30,8 +30,9 @@ def decode_bencode(bencoded_value: bytes):
                 raise ValueError("Invalid encoded integer")
             _bytes = data[1:-1]
             LOGGER.debug(f"Decoded integer bytes: {_bytes}")
-            if _bytes.decode().isdigit() or (_bytes.decode()[0] == "-" and _bytes.decode()[1:].isdigit()):
-                return int(_bytes)
+            decoded = _bytes.decode()
+            if decoded.isdigit() or (decoded[0] == "-" and decoded[1:].isdigit()):
+                return int(decoded)
             else:
                 raise ValueError(f"Invalid encoded integer, got {_bytes!r}")
         case _:
