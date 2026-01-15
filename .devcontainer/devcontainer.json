@@ -4,7 +4,11 @@
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "upgradePackages": true
+    },
+    "ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
+        "packages": "xclip"
     }
+}
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
