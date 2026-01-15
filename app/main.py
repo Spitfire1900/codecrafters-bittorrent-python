@@ -20,11 +20,13 @@ LOGGER.setLevel(logging.DEBUG)
 def decode_bencode(bencoded_value: bytes):
 
     match bencoded_value:
+        # Strings
         case data if chr(data[0]).isdigit():
             first_colon_index = data.find(b":")
             if first_colon_index == -1:
                 raise ValueError("Invalid encoded value")
             return data[first_colon_index + 1 :]
+        # Integers
         case data if data[0] == ord("i"):
             if data[-1] != ord("e"):
                 raise ValueError("Invalid encoded integer")
@@ -35,6 +37,7 @@ def decode_bencode(bencoded_value: bytes):
                 return int(decoded)
             else:
                 raise ValueError(f"Invalid encoded integer, got {_bytes!r}")
+        # No match
         case _:
             raise NotImplementedError(
                 "Only strings and integers are supported at the moment, receieved {bencoded_value!r}"
