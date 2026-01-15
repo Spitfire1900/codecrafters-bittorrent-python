@@ -1,29 +1,43 @@
 import json
 import sys
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
+)
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
+
 # import bencodepy - available if you need it!
 # import requests - available if you need it!
+
 
 # Examples:
 #
 # - decode_bencode(b"5:hello") -> b"hello"
 # - decode_bencode(b"10:hello12345") -> b"hello12345"
 def decode_bencode(bencoded_value: bytes):
-    
+
     match bencoded_value:
-        case data if data[0].isdigit():
+        case data if chr(data[0]).isdigit():
             first_colon_index = data.find(b":")
             if first_colon_index == -1:
                 raise ValueError("Invalid encoded value")
-            return data[first_colon_index+1:]
-        case data if data[0] == b'i':
-            if data[-1] != b'e':
+            return data[first_colon_index + 1 :]
+        case data if data[0] == ord("i"):
+            if data[-1] != ord("e"):
                 raise ValueError("Invalid encoded integer")
-            integer_bytes = data[1:-1]
-            return int(integer_bytes)
+            _bytes = data[1:-1]
+            LOGGER.debug(f"Decoded integer bytes: {_bytes}")
+            if _bytes.decode().isdigit() or (_bytes.decode()[0] == "-" and _bytes.decode()[1:].isdigit()):
+                return int(_bytes)
+            else:
+                raise ValueError(f"Invalid encoded integer, got {_bytes!r}")
         case _:
-            raise NotImplementedError("Only strings and integers are supported at the moment")
-
+            raise NotImplementedError(
+                "Only strings and integers are supported at the moment, receieved {bencoded_value!r}"
+            )
 
 
 def main():
@@ -40,13 +54,14 @@ def main():
         #
         # Let's convert them to strings for printing to the console.
         def bytes_to_str(data):
+            LOGGER.debug("Type: %s, Value: %s", type(data), data)
             if isinstance(data, bytes):
                 return data.decode()
-
             raise TypeError(f"Type not serializable: {type(data)}")
 
-        # TODO: Uncomment the code below to pass the first stage
-        print(json.dumps(decode_bencode(bencoded_value), default=bytes_to_str))
+        print(
+            json.dumps(decode_bencode(bencoded_value), default=bytes_to_str)
+        )  # default is only used when not serializable, e.g. bytes
     else:
         raise NotImplementedError(f"Unknown command {command}")
 
