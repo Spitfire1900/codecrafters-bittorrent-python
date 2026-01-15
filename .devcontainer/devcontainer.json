@@ -8,8 +8,7 @@
     "ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
         "packages": "xclip"
     }
-}
-  },
+},
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
