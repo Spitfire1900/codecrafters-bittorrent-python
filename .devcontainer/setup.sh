@@ -4,10 +4,11 @@ set -e
 pip install --upgrade pip
 pip install --upgrade-strategy eager pipx
 pipx install xonsh[full]
-pipx inject xonsh instld
-pipx inject xonsh xontrib-prompt-bar
-pipx inject xonsh xontrib-pygitstatus
-pipx inject xonsh xontrib-vox
+pipx inject xonsh \
+	instld \
+	xontrib-prompt-bar \
+	xontrib-pygitstatus \
+	xontrib-vox
 
 curl -LsSf https://astral.sh/uv/install.sh | sh
 curl -fsSL https://opencode.ai/install | bash
