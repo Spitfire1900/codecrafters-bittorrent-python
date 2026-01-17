@@ -1,6 +1,7 @@
 import json
 import sys
 import re
+from typing import Union, Tuple, List, Any, Callable
 
 import logging
 
@@ -18,13 +19,22 @@ LOGGER.setLevel(logging.DEBUG)
 #
 # - decode_bencode(b"5:hello") -> b"hello"
 # - decode_bencode(b"10:hello12345") -> b"hello12345"
-def decode_bencode(bencoded_value: bytes):
+def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any]]:
     """
     Iteratively decode bencode data using a stack-based approach.
     Handles arbitrary nesting depth without recursion.
+    
+    Args:
+        bencoded_value: Bencode-encoded bytes to decode
+        
+    Returns:
+        Decoded value (bytes, int, or list)
+        
+    Raises:
+        ValueError: If the bencode data is malformed
     """
     
-    def parse_element(data: bytes, index: int):
+    def parse_element(data: bytes, index: int) -> Tuple[Union[bytes, int], int]:
         """Parse a single element starting at index. Returns (element, next_index)"""
         if index >= len(data):
             raise ValueError("Unexpected end of data")
@@ -66,9 +76,9 @@ def decode_bencode(bencoded_value: bytes):
         return result
     
     # List parsing using stack for iterative approach
-    stack = []  # Stack of (list_container, depth_marker)
-    current_list = []
-    index = 1  # Skip initial 'l'
+    stack: List[Tuple[List[Any], str]] = []  # Stack of (list_container, depth_marker)
+    current_list: List[Any] = []
+    index: int = 1  # Skip initial 'l'
     
     while index < len(bencoded_value):
         char = bencoded_value[index]
@@ -98,20 +108,20 @@ def decode_bencode(bencoded_value: bytes):
     raise ValueError("Unclosed list - missing closing 'e'")
 
 
-def main():
-    command = sys.argv[1]
+def main() -> None:
+    command: str = sys.argv[1]
 
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!", file=sys.stderr)
 
     if command == "decode":
-        bencoded_value = sys.argv[2].encode()
+        bencoded_value: bytes = sys.argv[2].encode()
 
         # json.dumps() can't handle bytes, but bencoded "strings" need to be
         # bytestrings since they might contain non utf-8 characters.
         #
         # Let's convert them to strings for printing to the console.
-        def bytes_to_str(data):
+        def bytes_to_str(data: Any) -> str:
             LOGGER.debug("Type: %s, Value: %s", type(data), data)
             if isinstance(data, bytes):
                 return data.decode()
