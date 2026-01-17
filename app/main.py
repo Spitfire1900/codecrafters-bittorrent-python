@@ -1,7 +1,6 @@
 import json
 import sys
-import re
-from typing import Union, Tuple, List, Any, Callable
+from typing import Union, Tuple, List, Any
 
 import logging
 
@@ -11,18 +10,189 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.DEBUG)
 
-# import bencodepy - available if you need it!
-# import requests - available if you need it!
+
+class BencodeParser:
+    """
+    Iterative bencode parser supporting strings, integers, lists, and dictionaries.
+    
+    Uses a stack-based approach to handle arbitrary nesting depth without recursion.
+    """
+    
+    def __init__(self, data: bytes) -> None:
+        """Initialize parser with bencode data."""
+        self.data = data
+        self.index = 0
+    
+    def parse(self) -> Union[bytes, int, List[Any], dict]:
+        """
+        Parse bencode data and return the decoded value.
+        
+        Returns:
+            Decoded value (bytes, int, list, or dict)
+            
+        Raises:
+            ValueError: If the bencode data is malformed
+        """
+        if len(self.data) == 0:
+            raise ValueError("Empty encoded value")
+        
+        # Handle top-level strings and integers
+        if self.data[0] not in (ord("l"), ord("d")):
+            return self._parse_element()
+        
+        # Parse lists and dictionaries with stack
+        return self._parse_container()
+    
+    def _parse_element(self) -> Union[bytes, int]:
+        """
+        Parse a single element (string or integer) and return it.
+        Updates self.index to point past the element.
+        """
+        if self.index >= len(self.data):
+            raise ValueError("Unexpected end of data")
+        
+        current_byte = self.data[self.index]
+        
+        # Parse string (e.g., "5:hello")
+        if chr(current_byte).isdigit():
+            return self._parse_string()
+        
+        # Parse integer (e.g., "i42e")
+        elif current_byte == ord("i"):
+            return self._parse_integer()
+        
+        else:
+            raise ValueError(
+                f"Unexpected character at index {self.index}: {chr(current_byte)}"
+            )
+    
+    def _parse_string(self) -> bytes:
+        """Parse a bencode string (format: length:data)."""
+        colon_index = self.data.find(b":", self.index)
+        if colon_index == -1:
+            raise ValueError("Invalid encoded string - missing colon")
+        
+        try:
+            length = int(self.data[self.index:colon_index])
+        except ValueError:
+            raise ValueError(f"Invalid string length: {self.data[self.index:colon_index]}")
+        
+        start = colon_index + 1
+        end = start + length
+        
+        if end > len(self.data):
+            raise ValueError("String length exceeds available data")
+        
+        self.index = end
+        return self.data[start:end]
+    
+    def _parse_integer(self) -> int:
+        """Parse a bencode integer (format: i<number>e)."""
+        end_index = self.data.find(b"e", self.index)
+        if end_index == -1:
+            raise ValueError("Invalid encoded integer - missing closing 'e'")
+        
+        int_bytes = self.data[self.index + 1:end_index]
+        LOGGER.debug(f"Decoded integer bytes: {int_bytes}")
+        
+        try:
+            int_str = int_bytes.decode()
+        except UnicodeDecodeError:
+            raise ValueError(f"Invalid integer encoding: {int_bytes!r}")
+        
+        # Validate integer format
+        if not int_str or not (
+            int_str.isdigit() or (int_str[0] == "-" and int_str[1:].isdigit())
+        ):
+            raise ValueError(f"Invalid integer value: {int_bytes!r}")
+        
+        self.index = end_index + 1
+        return int(int_str)
+    
+    def _parse_container(self) -> Union[List[Any], dict]:
+        """
+        Parse a container (list or dict) using stack-based iteration.
+        Handles arbitrary nesting depth without recursion.
+        """
+        # Stack items: (container, container_type, pending_key)
+        stack: List[Tuple[Union[List[Any], dict[Any, Any]], str, Any]] = []
+        
+        # Initialize based on first character
+        if self.data[self.index] == ord("d"):
+            current = {}
+            container_type = "dict"
+            expecting_key = True
+        else:
+            current = []
+            container_type = "list"
+            expecting_key = False
+        
+        pending_key: Any = None
+        self.index += 1  # Skip 'l' or 'd'
+        
+        while self.index < len(self.data):
+            char = self.data[self.index]
+            
+            # End of container
+            if char == ord("e"):
+                if not stack:
+                    # End of top-level container
+                    return current
+                
+                # Pop from stack and attach current to parent
+                parent, parent_type, parent_key = stack.pop()
+                if parent_type == "dict":
+                    assert isinstance(parent, dict)
+                    parent[parent_key] = current
+                    expecting_key = True
+                else:
+                    assert isinstance(parent, list)
+                    parent.append(current)
+                    expecting_key = False
+                
+                current = parent
+                container_type = parent_type
+                pending_key = parent_key if parent_type == "dict" else None
+                self.index += 1
+            
+            # Start of nested list
+            elif char == ord("l"):
+                stack.append((current, container_type, pending_key))
+                current = []
+                container_type = "list"
+                expecting_key = False
+                self.index += 1
+            
+            # Start of nested dict
+            elif char == ord("d"):
+                stack.append((current, container_type, pending_key))
+                current = {}
+                container_type = "dict"
+                expecting_key = True
+                self.index += 1
+            
+            # Parse element (string or integer)
+            else:
+                element = self._parse_element()
+                
+                if container_type == "dict":
+                    assert isinstance(current, dict)
+                    if expecting_key:
+                        pending_key = element
+                        expecting_key = False
+                    else:
+                        current[pending_key] = element
+                        expecting_key = True
+                else:
+                    assert isinstance(current, list)
+                    current.append(element)
+        
+        raise ValueError("Unclosed container - missing closing 'e'")
 
 
-# Examples:
-#
-# - decode_bencode(b"5:hello") -> b"hello"
-# - decode_bencode(b"10:hello12345") -> b"hello12345"
 def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any], dict]:
     """
-    Iteratively decode bencode data using a stack-based approach.
-    Handles arbitrary nesting depth without recursion.
+    Decode bencode data.
     
     Supports:
     - Strings: 5:hello
@@ -39,129 +209,8 @@ def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any], dict]:
     Raises:
         ValueError: If the bencode data is malformed
     """
-    
-    def parse_element(data: bytes, index: int) -> Tuple[Union[bytes, int], int]:
-        """Parse a single element starting at index. Returns (element, next_index)"""
-        if index >= len(data):
-            raise ValueError("Unexpected end of data")
-        
-        # Strings
-        if chr(data[index]).isdigit():
-            colon_index = data.find(b":", index)
-            if colon_index == -1:
-                raise ValueError("Invalid encoded string")
-            length = int(data[index:colon_index])
-            start = colon_index + 1
-            end = start + length
-            if end > len(data):
-                raise ValueError("String length exceeds data")
-            return data[start:end], end
-        
-        # Integers
-        elif data[index] == ord("i"):
-            end_index = data.find(b"e", index)
-            if end_index == -1:
-                raise ValueError("Invalid encoded integer - no closing 'e'")
-            _bytes = data[index + 1:end_index]
-            LOGGER.debug(f"Decoded integer bytes: {_bytes}")
-            decoded = _bytes.decode()
-            if not decoded or not (decoded.isdigit() or (decoded[0] == "-" and decoded[1:].isdigit())):
-                raise ValueError(f"Invalid encoded integer, got {_bytes!r}")
-            return int(decoded), end_index + 1
-        
-        else:
-            raise ValueError(f"Unexpected character at index {index}: {chr(data[index])}")
-    
-    # Handle top-level non-list/non-dict types
-    if len(bencoded_value) == 0:
-        raise ValueError("Empty encoded value")
-    
-    if bencoded_value[0] not in (ord("l"), ord("d")):
-        # Top-level string or integer
-        result, _ = parse_element(bencoded_value, 0)
-        return result
-    
-    # Stack-based parsing for lists and dictionaries
-    # Stack items: (container, type, pending_key_for_dict)
-    # where container is List or dict, type is 'list' or 'dict'
-    stack: List[Tuple[Union[List[Any], dict[Any, Any]], str, Any]] = []
-    
-    # Determine initial container type
-    if bencoded_value[0] == ord("d"):
-        current_container: Union[List[Any], dict[Any, Any]] = {}
-        container_type = "dict"
-        expecting_key = True
-    else:
-        current_container = []
-        container_type = "list"
-        expecting_key = False
-    
-    pending_key: Any = None  # For dictionaries, temporary storage for the key
-    index: int = 1  # Skip initial 'l' or 'd'
-    
-    while index < len(bencoded_value):
-        char = bencoded_value[index]
-        
-        if char == ord("e"):
-            # End of current container
-            if not stack:
-                # End of top-level container
-                return current_container
-            # Pop from stack
-            parent_container, parent_type, parent_pending_key = stack.pop()
-            
-            if parent_type == "dict":
-                # We're closing a nested container (list or dict) that's a value in the parent dict
-                assert isinstance(parent_container, dict)
-                parent_container[parent_pending_key] = current_container
-                expecting_key = True
-            else:
-                # We're closing a nested container (list or dict) that's an element in the parent list
-                assert isinstance(parent_container, list)
-                parent_container.append(current_container)
-                expecting_key = False
-            
-            current_container = parent_container
-            container_type = parent_type
-            pending_key = parent_pending_key if parent_type == "dict" else None
-            index += 1
-        
-        elif char == ord("l"):
-            # Start of nested list
-            stack.append((current_container, container_type, pending_key))
-            current_container = []
-            container_type = "list"
-            expecting_key = False
-            index += 1
-        
-        elif char == ord("d"):
-            # Start of nested dictionary
-            stack.append((current_container, container_type, pending_key))
-            current_container = {}
-            container_type = "dict"
-            expecting_key = True
-            index += 1
-        
-        else:
-            # Parse element (string or integer)
-            element, index = parse_element(bencoded_value, index)
-            
-            if container_type == "dict":
-                assert isinstance(current_container, dict)
-                if expecting_key:
-                    # Store key temporarily
-                    pending_key = element
-                    expecting_key = False
-                else:
-                    # This is a value, pair it with the stored key
-                    current_container[pending_key] = element
-                    expecting_key = True
-            else:
-                assert isinstance(current_container, list)
-                # List element
-                current_container.append(element)
-    
-    raise ValueError("Unclosed container - missing closing 'e'")
+    parser = BencodeParser(bencoded_value)
+    return parser.parse()
 
 
 def main() -> None:
