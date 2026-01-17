@@ -115,12 +115,17 @@ run_test "List with single element" "l5:helloe" '["hello"]'
 run_test "Nested list then integer" "lli1eei42ee" '[[1], 42]'
 echo ""
 
-# EDGE CASES - STRINGS WITH SPECIAL CONTENT
-echo "=== EDGE CASES - STRINGS WITH SPECIAL CONTENT ==="
-run_test "String with 4 chars" "4:test" '"test"'
-run_test "String with 5 chars" "5:hello" '"hello"'
-run_test "String all es" "3:eee" '"eee"'
-run_test "String with numbers" "5:12345" '"12345"'
+# DICTIONARY TESTS
+echo "=== DICTIONARY TESTS ==="
+run_test "Empty dict" "de" '{}'
+run_test "Simple key-value" "d3:key5:valuee" '{"key": "value"}'
+run_test "Dict with integer" "d1:ai42ee" '{"a": 42}'
+run_test "Dict with string" "d1:a5:helloe" '{"a": "hello"}'
+run_test "Dict with list" "d1:al5:helloee" '{"a": ["hello"]}'
+run_test "Dict with multiple keys" "d1:ai1e1:bi2ee" '{"a": 1, "b": 2}'
+run_test "Nested dict" "d2:d1d3:key5:valueeee" '{"d1": {"key": "value"}}'
+run_test "Dict with multi-element list" "d1:ali1ei2eee" '{"a": [1, 2]}'
+run_test "Dict with list of dicts" "d1:ald1:a1:xeeee" '{"a": [{"a": "x"}]}'
 echo ""
 
 # ERROR CASES
