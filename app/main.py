@@ -1,5 +1,6 @@
 import json
 import sys
+import re
 
 import logging
 
@@ -18,30 +19,83 @@ LOGGER.setLevel(logging.DEBUG)
 # - decode_bencode(b"5:hello") -> b"hello"
 # - decode_bencode(b"10:hello12345") -> b"hello12345"
 def decode_bencode(bencoded_value: bytes):
-
-    match bencoded_value:
+    """
+    Iteratively decode bencode data using a stack-based approach.
+    Handles arbitrary nesting depth without recursion.
+    """
+    
+    def parse_element(data: bytes, index: int):
+        """Parse a single element starting at index. Returns (element, next_index)"""
+        if index >= len(data):
+            raise ValueError("Unexpected end of data")
+        
         # Strings
-        case data if chr(data[0]).isdigit():
-            first_colon_index = data.find(b":")
-            if first_colon_index == -1:
-                raise ValueError("Invalid encoded value")
-            return data[first_colon_index + 1 :]
+        if chr(data[index]).isdigit():
+            colon_index = data.find(b":", index)
+            if colon_index == -1:
+                raise ValueError("Invalid encoded string")
+            length = int(data[index:colon_index])
+            start = colon_index + 1
+            end = start + length
+            if end > len(data):
+                raise ValueError("String length exceeds data")
+            return data[start:end], end
+        
         # Integers
-        case data if data[0] == ord("i"):
-            if data[-1] != ord("e"):
-                raise ValueError("Invalid encoded integer")
-            _bytes = data[1:-1]
+        elif data[index] == ord("i"):
+            end_index = data.find(b"e", index)
+            if end_index == -1:
+                raise ValueError("Invalid encoded integer - no closing 'e'")
+            _bytes = data[index + 1:end_index]
             LOGGER.debug(f"Decoded integer bytes: {_bytes}")
             decoded = _bytes.decode()
-            if decoded.isdigit() or (decoded[0] == "-" and decoded[1:].isdigit()):
-                return int(decoded)
-            else:
+            if not decoded or not (decoded.isdigit() or (decoded[0] == "-" and decoded[1:].isdigit())):
                 raise ValueError(f"Invalid encoded integer, got {_bytes!r}")
-        # No match
-        case _:
-            raise NotImplementedError(
-                "Only strings and integers are supported at the moment, receieved {bencoded_value!r}"
-            )
+            return int(decoded), end_index + 1
+        
+        else:
+            raise ValueError(f"Unexpected character at index {index}: {chr(data[index])}")
+    
+    # Handle top-level non-list types
+    if len(bencoded_value) == 0:
+        raise ValueError("Empty encoded value")
+    
+    if bencoded_value[0] != ord("l"):
+        # Top-level string or integer
+        result, _ = parse_element(bencoded_value, 0)
+        return result
+    
+    # List parsing using stack for iterative approach
+    stack = []  # Stack of (list_container, depth_marker)
+    current_list = []
+    index = 1  # Skip initial 'l'
+    
+    while index < len(bencoded_value):
+        char = bencoded_value[index]
+        
+        if char == ord("e"):
+            # End of list
+            if not stack:
+                # This is the end of the top-level list
+                return current_list
+            # Pop from stack and add current list to parent
+            parent_list, _ = stack.pop()
+            parent_list.append(current_list)
+            current_list = parent_list
+            index += 1
+        
+        elif char == ord("l"):
+            # Start of nested list
+            stack.append((current_list, "list"))
+            current_list = []
+            index += 1
+        
+        else:
+            # Parse element (string or integer)
+            element, index = parse_element(bencoded_value, index)
+            current_list.append(element)
+    
+    raise ValueError("Unclosed list - missing closing 'e'")
 
 
 def main():
