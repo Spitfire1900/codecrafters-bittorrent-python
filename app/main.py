@@ -1,8 +1,8 @@
 import json
-import sys
-from typing import Any, Optional
 import logging
 import os
+import sys
+from typing import Any, Optional
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
