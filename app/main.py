@@ -1,14 +1,15 @@
 import json
 import sys
-from typing import Union, Tuple, List, Any
-
+from typing import Union, Tuple, List, Any, Optional
 import logging
+import os
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
 )
 LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(logging.DEBUG)
+log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
+LOGGER.setLevel(getattr(logging, log_level, logging.DEBUG))
 
 
 class BencodeParser:
@@ -16,12 +17,21 @@ class BencodeParser:
     Iterative bencode parser supporting strings, integers, lists, and dictionaries.
     
     Uses a stack-based approach to handle arbitrary nesting depth without recursion.
+    
+    Args:
+        data: Bencode-encoded bytes to parse
+        max_depth: Optional maximum nesting depth (None = no limit)
+        max_size: Optional maximum bytes allowed to decode (None = no limit)
     """
     
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes, max_depth: Optional[int] = None, 
+                 max_size: Optional[int] = None) -> None:
         """Initialize parser with bencode data."""
         self.data = data
         self.index = 0
+        self.max_depth = max_depth
+        self.max_size = max_size
+        self.current_depth = 0
     
     def parse(self) -> Union[bytes, int, List[Any], dict]:
         """
@@ -72,10 +82,23 @@ class BencodeParser:
         if colon_index == -1:
             raise ValueError("Invalid encoded string - missing colon")
         
+        len_bytes = self.data[self.index:colon_index]
+        
         try:
-            length = int(self.data[self.index:colon_index])
+            length = int(len_bytes)
         except ValueError:
-            raise ValueError(f"Invalid string length: {self.data[self.index:colon_index]}")
+            raise ValueError(f"Invalid string length: {len_bytes}")
+        
+        # RFC 1337: Disallow leading zeros (except for single '0')
+        if len(len_bytes) > 1 and len_bytes.startswith(b"0"):
+            raise ValueError("String lengths must not have leading zeros")
+        
+        if length < 0:
+            raise ValueError("String length cannot be negative")
+        
+        # Check max_size limit
+        if self.max_size is not None and length > self.max_size:
+            raise ValueError(f"String length {length} exceeds maximum allowed {self.max_size}")
         
         start = colon_index + 1
         end = start + length
@@ -100,11 +123,20 @@ class BencodeParser:
         except UnicodeDecodeError:
             raise ValueError(f"Invalid integer encoding: {int_bytes!r}")
         
-        # Validate integer format
+        # Validate integer format according to RFC 1337
         if not int_str or not (
             int_str.isdigit() or (int_str[0] == "-" and int_str[1:].isdigit())
         ):
             raise ValueError(f"Invalid integer value: {int_bytes!r}")
+        
+        # RFC 1337: Reject numbers with leading zeros (except for "-0" edge case)
+        num_part = int_str.lstrip("-")
+        if len(num_part) > 1 and num_part.startswith("0"):
+            raise ValueError("Integers must not have leading zeros")
+        
+        # Prevent leading minus sign with zero (i.e., "i-0e")
+        if int_str == "-0":
+            raise ValueError("Negative zero is not allowed")
         
         self.index = end_index + 1
         return int(int_str)
@@ -117,6 +149,10 @@ class BencodeParser:
         # Stack items: (container, container_type, pending_key)
         stack: List[Tuple[Union[List[Any], dict[Any, Any]], str, Any]] = []
         
+        # Check initial depth
+        if self.max_depth is not None and self.current_depth >= self.max_depth:
+            raise ValueError(f"Maximum nesting depth {self.max_depth} exceeded")
+        
         # Initialize based on first character
         if self.data[self.index] == ord("d"):
             current = {}
@@ -128,6 +164,7 @@ class BencodeParser:
             expecting_key = False
         
         pending_key: Any = None
+        self.current_depth += 1
         self.index += 1  # Skip 'l' or 'd'
         
         while self.index < len(self.data):
@@ -135,6 +172,7 @@ class BencodeParser:
             
             # End of container
             if char == ord("e"):
+                self.current_depth -= 1
                 if not stack:
                     # End of top-level container
                     return current
@@ -157,18 +195,24 @@ class BencodeParser:
             
             # Start of nested list
             elif char == ord("l"):
+                if self.max_depth is not None and self.current_depth + 1 > self.max_depth:
+                    raise ValueError(f"Maximum nesting depth {self.max_depth} exceeded")
                 stack.append((current, container_type, pending_key))
                 current = []
                 container_type = "list"
                 expecting_key = False
+                self.current_depth += 1
                 self.index += 1
             
             # Start of nested dict
             elif char == ord("d"):
+                if self.max_depth is not None and self.current_depth + 1 > self.max_depth:
+                    raise ValueError(f"Maximum nesting depth {self.max_depth} exceeded")
                 stack.append((current, container_type, pending_key))
                 current = {}
                 container_type = "dict"
                 expecting_key = True
+                self.current_depth += 1
                 self.index += 1
             
             # Parse element (string or integer)
@@ -190,7 +234,8 @@ class BencodeParser:
         raise ValueError("Unclosed container - missing closing 'e'")
 
 
-def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any], dict]:
+def decode_bencode(bencoded_value: bytes, max_depth: Optional[int] = None,
+                   max_size: Optional[int] = None) -> Union[bytes, int, List[Any], dict]:
     """
     Decode bencode data.
     
@@ -202,6 +247,8 @@ def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any], dict]:
     
     Args:
         bencoded_value: Bencode-encoded bytes to decode
+        max_depth: Optional maximum nesting depth (None = no limit)
+        max_size: Optional maximum bytes allowed in a single string (None = no limit)
         
     Returns:
         Decoded value (bytes, int, list, or dict)
@@ -209,49 +256,97 @@ def decode_bencode(bencoded_value: bytes) -> Union[bytes, int, List[Any], dict]:
     Raises:
         ValueError: If the bencode data is malformed
     """
-    parser = BencodeParser(bencoded_value)
+    parser = BencodeParser(bencoded_value, max_depth=max_depth, max_size=max_size)
     return parser.parse()
 
 
-def main() -> None:
-    command: str = sys.argv[1]
+def convert_bytes_to_str(obj: Any, use_latin1: bool = False) -> Any:
+    """Recursively convert bytes to strings in dicts and lists.
+    
+    Args:
+        obj: Object to convert
+        use_latin1: If True, use latin-1 fallback for non-UTF-8 bytes
+    
+    Returns:
+        Converted object with bytes as strings where possible
+    """
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode('utf-8')
+        except UnicodeDecodeError:
+            if use_latin1:
+                return obj.decode('latin-1')
+            else:
+                return obj  # Keep as bytes if decoding fails
+    elif isinstance(obj, dict):
+        return {(k.decode('utf-8') if isinstance(k, bytes) else k): 
+                convert_bytes_to_str(v, use_latin1=use_latin1)
+                for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_bytes_to_str(item, use_latin1=use_latin1) for item in obj]
+    else:
+        return obj
 
+
+def bytes_to_str(data: Any) -> str:
+    """JSON serializer for bytes objects."""
+    LOGGER.debug("Type: %s, Value: %s", type(data), data)
+    if isinstance(data, bytes):
+        try:
+            return data.decode('utf-8')
+        except UnicodeDecodeError:
+            return data.decode('latin-1', errors='replace')
+    raise TypeError(f"Type not serializable: {type(data)}")
+
+
+def main() -> None:
+    """Entry point for the bencode tool."""
+    import argparse
+    
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!", file=sys.stderr)
-
-    if command == "decode":
-        bencoded_value: bytes = sys.argv[2].encode()
-
-        # json.dumps() can't handle bytes, but bencoded "strings" need to be
-        # bytestrings since they might contain non utf-8 characters.
-        #
-        # Let's convert them to strings for printing to the console.
-        def convert_bytes_to_str(obj: Any) -> Any:
-            """Recursively convert bytes to strings in dicts and lists."""
-            if isinstance(obj, bytes):
-                return obj.decode()
-            elif isinstance(obj, dict):
-                return {(k.decode() if isinstance(k, bytes) else k): convert_bytes_to_str(v) 
-                        for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_bytes_to_str(item) for item in obj]
-            else:
-                return obj
-
-        def bytes_to_str(data: Any) -> str:
-            LOGGER.debug("Type: %s, Value: %s", type(data), data)
-            if isinstance(data, bytes):
-                return data.decode()
-            raise TypeError(f"Type not serializable: {type(data)}")
-
-        result = decode_bencode(bencoded_value)
-        result = convert_bytes_to_str(result)
-        print(
-            json.dumps(result, default=bytes_to_str)
-
-        )  # default is only used when not serializable, e.g. bytes
+    
+    parser = argparse.ArgumentParser(description="Minimal bencoding tool")
+    subparsers = parser.add_subparsers(dest="command", required=True, 
+                                       help="Command to execute")
+    
+    # Decode subcommand
+    decode_parser = subparsers.add_parser("decode", help="Decode bencode data")
+    decode_parser.add_argument("bencoded", help="Bencoded payload")
+    decode_parser.add_argument("--latin1", action="store_true",
+                              help="Use latin-1 fallback for non-UTF-8 bytes")
+    decode_parser.add_argument("--max-depth", type=int, default=None,
+                              help="Maximum nesting depth (DoS protection)")
+    decode_parser.add_argument("--max-size", type=int, default=None,
+                              help="Maximum string size in bytes (DoS protection)")
+    
+    try:
+        args = parser.parse_args()
+    except SystemExit:
+        raise
+    
+    if args.command == "decode":
+        try:
+            # Accept both UTF-8 strings and hex-encoded values
+            bencoded_value = args.bencoded.encode('utf-8')
+        except Exception as e:
+            print(f"Error encoding input: {e}", file=sys.stderr)
+            sys.exit(1)
+        
+        try:
+            result = decode_bencode(bencoded_value, 
+                                   max_depth=args.max_depth,
+                                   max_size=args.max_size)
+            result = convert_bytes_to_str(result, use_latin1=args.latin1)
+            print(json.dumps(result, default=bytes_to_str))
+        except ValueError as e:
+            print(f"Decode error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
-        raise NotImplementedError(f"Unknown command {command}")
+        raise NotImplementedError(f"Unknown command {args.command}")
 
 
 if __name__ == "__main__":
