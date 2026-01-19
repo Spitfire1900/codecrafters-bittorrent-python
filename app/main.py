@@ -317,6 +317,73 @@ def bytes_to_str(data: Any) -> str:
     raise TypeError(f"Type not serializable: {type(data)}")
 
 
+def parse_torrent_file(torrent_file_path: str) -> dict:
+    """
+    Parse a torrent file and return its decoded content.
+    
+    Args:
+        torrent_file_path: Path to the torrent file
+        
+    Returns:
+        Dictionary containing the parsed torrent data
+        
+    Raises:
+        FileNotFoundError: If the torrent file doesn't exist
+        ValueError: If the torrent file is malformed
+    """
+    if not os.path.exists(torrent_file_path):
+        raise FileNotFoundError(f"Torrent file not found: {torrent_file_path}")
+    
+    try:
+        with open(torrent_file_path, 'rb') as f:
+            torrent_data = f.read()
+        
+        # Parse the bencoded data
+        decoded_data = decode_bencode(torrent_data)
+        
+        # Convert bytes to strings where possible
+        parsed_data = convert_bytes_to_str(decoded_data)
+        
+        return parsed_data
+        
+    except Exception as e:
+        raise ValueError(f"Error parsing torrent file: {e}")
+
+
+def validate_torrent_structure(torrent_data: dict) -> bool:
+    """
+    Validate that the parsed torrent data has the required structure.
+    
+    Args:
+        torrent_data: Parsed torrent data dictionary
+        
+    Returns:
+        True if the torrent structure is valid, False otherwise
+    """
+    required_keys = ['info']
+    
+    # Check required top-level keys
+    for key in required_keys:
+        if key not in torrent_data:
+            LOGGER.error(f"Missing required key: {key}")
+            return False
+    
+    # Check info dictionary
+    info = torrent_data.get('info', {})
+    if not isinstance(info, dict):
+        LOGGER.error("Info section must be a dictionary")
+        return False
+    
+    # Check required info keys
+    required_info_keys = ['piece length']
+    for key in required_info_keys:
+        if key not in info:
+            LOGGER.error(f"Missing required info key: {key}")
+            return False
+    
+    return True
+
+
 def main() -> None:
     """Entry point for the bencode tool."""
     import argparse
@@ -347,6 +414,16 @@ def main() -> None:
         default=None,
         help="Maximum string size in bytes (DoS protection)",
     )
+    
+    # Parse torrent subcommand
+    torrent_parser = subparsers.add_parser("parse-torrent", help="Parse torrent file")
+    torrent_parser.add_argument("torrent_file", help="Path to torrent file")
+    torrent_parser.add_argument(
+        "--validate", action="store_true", help="Validate torrent structure"
+    )
+    torrent_parser.add_argument(
+        "--pretty", action="store_true", help="Pretty print JSON output"
+    )
 
     try:
         args = parser.parse_args()
@@ -369,6 +446,30 @@ def main() -> None:
             print(json.dumps(result, default=bytes_to_str))
         except ValueError as e:
             print(f"Decode error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.command == "parse-torrent":
+        try:
+            result = parse_torrent_file(args.torrent_file)
+            
+            if args.validate:
+                is_valid = validate_torrent_structure(result)
+                print(f"Torrent structure validation: {'PASS' if is_valid else 'FAIL'}")
+                if not is_valid:
+                    sys.exit(1)
+            
+            if args.pretty:
+                print(json.dumps(result, default=bytes_to_str, indent=2))
+            else:
+                print(json.dumps(result, default=bytes_to_str))
+                
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             print(f"Unexpected error: {e}", file=sys.stderr)
