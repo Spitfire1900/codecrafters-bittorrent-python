@@ -151,6 +151,76 @@ PYTHON
 run_test "100 levels of nesting" "$deep_nested" "$(python3 -c "print('[' * 100 + ']' * 100)")"
 echo ""
 
+# TORRENT FILE TESTS
+echo "=== TORRENT FILE TESTS ==="
+# Test parsing sample torrent
+if [ -f "$SCRIPT_DIR/sample.torrent" ]; then
+    echo -n "Testing: Parse sample.torrent ... "
+    torrent_output=$($APP_CMD parse-torrent "$SCRIPT_DIR/sample.torrent" 2>&1)
+    exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        # Check if announce field is present
+        if echo "$torrent_output" | grep -q '"announce"'; then
+            echo -e "${GREEN}✓ PASS${NC}"
+            ((TESTS_PASSED++))
+        else
+            echo -e "${RED}✗ FAIL${NC} (announce field missing)"
+            ((TESTS_FAILED++))
+        fi
+    else
+        echo -e "${RED}✗ FAIL${NC} (parsing error)"
+        echo "  Output: $torrent_output"
+        ((TESTS_FAILED++))
+    fi
+else
+    echo -e "${YELLOW}⊘ SKIP${NC} (sample.torrent not found)"
+    ((TESTS_SKIPPED++))
+fi
+
+# Test pieces field hex format
+echo -n "Testing: Pieces field hex format ... "
+if [ -f "$SCRIPT_DIR/sample.torrent" ]; then
+    torrent_output=$($APP_CMD parse-torrent "$SCRIPT_DIR/sample.torrent" 2>&1)
+    
+    # Check if pieces field has hex format: <hex>XX XX XX...</hex>
+    if echo "$torrent_output" | grep -qE '"pieces":\s*"<hex>[0-9A-F ]+</hex>"'; then
+        echo -e "${GREEN}✓ PASS${NC}"
+        ((TESTS_PASSED++))
+    else
+        echo -e "${RED}✗ FAIL${NC} (pieces field not in hex format)"
+        echo "  Expected format: \"pieces\": \"<hex>XX XX XX...</hex>\""
+        ((TESTS_FAILED++))
+    fi
+else
+    echo -e "${YELLOW}⊘ SKIP${NC} (sample.torrent not found)"
+    ((TESTS_SKIPPED++))
+fi
+
+# Test kubuntu torrent if available
+if [ -f "$SCRIPT_DIR/kubuntu-24.04.3-desktop-amd64.iso.torrent" ]; then
+    echo -n "Testing: Parse kubuntu torrent ... "
+    torrent_output=$($APP_CMD parse-torrent "$SCRIPT_DIR/kubuntu-24.04.3-desktop-amd64.iso.torrent" 2>&1)
+    exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        # Check required fields
+        if echo "$torrent_output" | grep -q '"announce"' && \
+           echo "$torrent_output" | grep -q '"name"' && \
+           echo "$torrent_output" | grep -q '"pieces"'; then
+            echo -e "${GREEN}✓ PASS${NC}"
+            ((TESTS_PASSED++))
+        else
+            echo -e "${RED}✗ FAIL${NC} (required fields missing)"
+            ((TESTS_FAILED++))
+        fi
+    else
+        echo -e "${RED}✗ FAIL${NC} (parsing error)"
+        ((TESTS_FAILED++))
+    fi
+fi
+echo ""
+
 # SUMMARY
 echo "=========================================="
 echo "Test Summary:"

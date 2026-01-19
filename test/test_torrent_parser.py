@@ -205,6 +205,32 @@ class TestIntegration:
         assert isinstance(result["info"]["name"], str)
         
         # The test is now complete - we've already parsed and validated the sample torrent
+    
+    def test_pieces_field_hex_format(self):
+        """Test that pieces field is formatted as hex in output."""
+        # Parse the sample torrent
+        result = parse_torrent_file("sample.torrent")
+        
+        # Verify pieces field exists and is properly formatted as hex
+        pieces = result["info"]["pieces"]
+        assert pieces is not None
+        
+        # The pieces field should be a string in hex format like "<hex>XX XX XX...</hex>"
+        assert isinstance(pieces, str)
+        assert pieces.startswith("<hex>")
+        assert pieces.endswith("</hex>")
+        
+        # Verify it contains hex characters (after <hex> and before </hex>)
+        hex_content = pieces[5:-6]  # Extract content between <hex> and </hex>
+        # Should contain hex digits and spaces
+        allowed_chars = set("0123456789ABCDEF ")
+        assert all(c in allowed_chars for c in hex_content)
+        
+        # Should contain space-separated pairs (e.g., "AA BB CC")
+        pairs = hex_content.split()
+        for pair in pairs:
+            assert len(pair) == 2
+            assert all(c in "0123456789ABCDEF" for c in pair)
 
 
 if __name__ == "__main__":

@@ -275,17 +275,33 @@ def decode_bencode(
     return parser.parse()
 
 
-def convert_bytes_to_str(obj: Any, use_latin1: bool = False) -> Any:
+def bytes_to_hex_string(data: bytes) -> str:
+    """Convert bytes to hex string format like '<hex>AA BB CC...</hex>'.
+    
+    Args:
+        data: Bytes to convert
+        
+    Returns:
+        Hex string representation
+    """
+    hex_str = " ".join(f"{byte:02X}" for byte in data)
+    return f"<hex>{hex_str}</hex>"
+
+
+def convert_bytes_to_str(obj: Any, use_latin1: bool = False, is_pieces_field: bool = False) -> Any:
     """Recursively convert bytes to strings in dicts and lists.
 
     Args:
         obj: Object to convert
         use_latin1: If True, use latin-1 fallback for non-UTF-8 bytes
+        is_pieces_field: If True, convert bytes to hex format for pieces field
 
     Returns:
         Converted object with bytes as strings where possible
     """
     if isinstance(obj, bytes):
+        if is_pieces_field:
+            return bytes_to_hex_string(obj)
         try:
             return obj.decode("utf-8")
         except UnicodeDecodeError:
@@ -294,14 +310,17 @@ def convert_bytes_to_str(obj: Any, use_latin1: bool = False) -> Any:
             else:
                 return obj  # Keep as bytes if decoding fails
     elif isinstance(obj, dict):
-        return {
-            (k.decode("utf-8") if isinstance(k, bytes) else k): convert_bytes_to_str(
-                v, use_latin1=use_latin1
-            )
-            for k, v in obj.items()
-        }
+        result = {}
+        for k, v in obj.items():
+            key = k.decode("utf-8") if isinstance(k, bytes) else k
+            # Special handling for 'pieces' field within 'info' dict
+            if key == "pieces":
+                result[key] = convert_bytes_to_str(v, use_latin1=use_latin1, is_pieces_field=True)
+            else:
+                result[key] = convert_bytes_to_str(v, use_latin1=use_latin1, is_pieces_field=False)
+        return result
     elif isinstance(obj, list):
-        return [convert_bytes_to_str(item, use_latin1=use_latin1) for item in obj]
+        return [convert_bytes_to_str(item, use_latin1=use_latin1, is_pieces_field=is_pieces_field) for item in obj]
     else:
         return obj
 
